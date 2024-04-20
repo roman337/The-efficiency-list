@@ -4,25 +4,30 @@ import (
 	"database/sql"
 	"fmt"
 	"math/rand"
+	"os"
+	"sort"
 	"time"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/go-echarts/go-echarts/v2/charts"
+	"github.com/go-echarts/go-echarts/v2/opts"
+	"github.com/go-echarts/go-echarts/v2/types"
 	_ "github.com/lib/pq"
 )
 
 const (
-	host = "localhost"
-	port = 5432
-	user = "postgres"
 	// max and min count of status per day
 	max = 20
 	min = 1
 )
 
 type DBConfig struct {
-	DBname   string
+	Host     string
+	Port     int
+	User     string
 	Password string
+	DBname   string
 }
 
 type Count struct {
@@ -33,9 +38,8 @@ func main() {
 	var dbConf DBConfig
 	_, err := toml.DecodeFile("config.toml", &dbConf)
 
-	password, dbname := dbConf.Password, dbConf.DBname
-	postgresqlDbInfo := fmt.Sprintf("host=%s port=%d user=%s "+
-		"password=%s dbname=%s sslmode=disable",
+	host, port, user, password, dbname := dbConf.Host, dbConf.Port, dbConf.User, dbConf.Password, dbConf.DBname
+	postgresqlDbInfo := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
 	db, err := sql.Open("postgres", postgresqlDbInfo)
 	CheckError(err)
@@ -55,18 +59,24 @@ func main() {
 	CheckError(err)
 
 	year, month, day := time.Now().Date()
+	day -= 16
 	for i := day - 6; i <= day; i++ {
-		generateDoneCount := rand.Intn(max-min) + min
+		randomStatusCount := rand.Intn(max-min) + min
 		//generateNewCount := rand.Intn(max-min) + min
 
-		for j := 0; j < generateDoneCount; j++ {
+		for j := 0; j < randomStatusCount; j++ {
 			letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 			themeRunes := make([]rune, 10)
 			for index := range themeRunes {
 				themeRunes[index] = letterRunes[rand.Intn(len(letterRunes))]
 			}
 			theme := string(themeRunes)
-			timeCreation := fmt.Sprint(i) + month.String() + fmt.Sprint(year)
+			var timeCreation string
+			if i <= 0 {
+				timeCreation = fmt.Sprint(i+CheckMonth(time.Month(int(month)-1))) + time.Month(int(month)-1).String() + fmt.Sprint(year)
+			} else {
+				timeCreation = fmt.Sprint(i) + month.String() + fmt.Sprint(year)
+			}
 			randomStatus := RandomStatus()
 			insertDynStr := `insert into "tickets" ("theme", "time_creation", "current_status") values ($1, $2, $3)`
 			_, err = db.Exec(insertDynStr, theme, timeCreation, randomStatus)
@@ -75,9 +85,8 @@ func main() {
 	}
 
 	rows, err := db.Query(`SELECT * FROM "tickets"`)
-	fmt.Println(rows)
 
-	var tickets = map[string]Count{}
+	tickets := make(map[string]Count)
 
 	for rows.Next() {
 		var theme string
@@ -113,14 +122,34 @@ func main() {
 		fmt.Println(theme, dateCreationFormat, status)
 	}
 
+	keys := make([]string, 0, len(tickets))
+	for key, _ := range tickets {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
 	fmt.Print(tickets)
 	CheckError(err)
+	createLineChart(tickets, keys)
 }
 
 func CheckError(err error) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func CheckMonth(month time.Month) int {
+	var result int
+	switch int(month) {
+	case 1, 3, 5, 7, 8, 10, 12:
+		result = 31
+	case 4, 6, 9, 11:
+		result = 30
+	case 2:
+		result = 28
+	}
+	return result
 }
 
 func RandomStatus() string {
@@ -131,3 +160,50 @@ func RandomStatus() string {
 		return "new"
 	}
 }
+
+func generateLineItems(tickets map[string]Count, keys []string, ticketStatus string) []opts.LineData {
+	items := make([]opts.LineData, 0)
+	if ticketStatus == "new" {
+		for _, key := range keys {
+			items = append(items, opts.LineData{Value: tickets[key].new})
+			fmt.Println(key)
+		}
+	} else if ticketStatus == "done" {
+		for _, count := range tickets {
+			items = append(items, opts.LineData{Value: count.done})
+		}
+	}
+	return items
+}
+
+func createLineChart(tickets map[string]Count, keys []string) {
+	// create a new line instance
+	line := charts.NewLine()
+
+	// set some global options like Title/Legend/ToolTip or anything else
+	line.SetGlobalOptions(
+		charts.WithInitializationOpts(opts.Initialization{
+			Theme: types.ThemeInfographic}),
+		charts.WithTitleOpts(opts.Title{
+			Title: "Продуктивность отдела"}),
+	)
+
+	// Put data into instance
+	line.SetXAxis([]string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}).
+		AddSeries("Новые статусы", generateLineItems(tickets, keys, "new")).
+		AddSeries("Выполненные статусы", generateLineItems(tickets, keys, "done")).
+		SetSeriesOptions(charts.WithLineChartOpts(opts.LineChart{Smooth: true}))
+	f, _ := os.Create("line.html")
+	_ = line.Render(f)
+}
+
+// func sortedDates(tickets map[string]V) ([]K) {
+// 	keys := make([]K, len(m))
+// 	i := 0
+// 	for k := range m {
+// 		keys[i] = k
+// 		i++
+// 	}
+// 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+// 	return keys
+// }
