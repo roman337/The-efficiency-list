@@ -49,21 +49,13 @@ func main() {
 	CheckError(err)
 	fmt.Println("Established a successful connection!")
 
-	//rows, err := db.Query("select * from tickets")
-	//CheckError(err)
-	//fmt.Println(rows)
-	// selectRow := `select * from tickets`
-
-	deleteStr := `truncate table tickets`
+	deleteStr := `truncate table tickets` // remove all datas before every using
 	_, err = db.Exec(deleteStr)
 	CheckError(err)
 
-	year, month, day := time.Now().Date()
-	day -= 16
-	for i := day - 6; i <= day; i++ {
+	year, month, day := time.Now().Date() // today
+	for i := day - 6; i <= day; i++ {     //fill the table with random data from the last 7 days
 		randomStatusCount := rand.Intn(max-min) + min
-		//generateNewCount := rand.Intn(max-min) + min
-
 		for j := 0; j < randomStatusCount; j++ {
 			letterRunes := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 			themeRunes := make([]rune, 10)
@@ -122,12 +114,12 @@ func main() {
 		fmt.Println(theme, dateCreationFormat, status)
 	}
 
-	keys := make([]string, 0, len(tickets))
-	for key, _ := range tickets {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
+	// keys := make([]string, 0, len(tickets))
+	// for key, _ := range tickets {
+	// 	keys = append(keys, key)
+	// }
+	// sort.Strings(keys)
+	keys := sortedDates(tickets)
 	fmt.Print(tickets)
 	CheckError(err)
 	createLineChart(tickets, keys)
@@ -169,8 +161,8 @@ func generateLineItems(tickets map[string]Count, keys []string, ticketStatus str
 			fmt.Println(key)
 		}
 	} else if ticketStatus == "done" {
-		for _, count := range tickets {
-			items = append(items, opts.LineData{Value: count.done})
+		for _, key := range keys {
+			items = append(items, opts.LineData{Value: tickets[key].done})
 		}
 	}
 	return items
@@ -183,13 +175,15 @@ func createLineChart(tickets map[string]Count, keys []string) {
 	// set some global options like Title/Legend/ToolTip or anything else
 	line.SetGlobalOptions(
 		charts.WithInitializationOpts(opts.Initialization{
-			Theme: types.ThemeInfographic}),
+			Theme: types.ThemeInfographic,
+			Width: "1200px",
+		}),
 		charts.WithTitleOpts(opts.Title{
 			Title: "Продуктивность отдела"}),
 	)
 
 	// Put data into instance
-	line.SetXAxis([]string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}).
+	line.SetXAxis(keys).
 		AddSeries("Новые статусы", generateLineItems(tickets, keys, "new")).
 		AddSeries("Выполненные статусы", generateLineItems(tickets, keys, "done")).
 		SetSeriesOptions(charts.WithLineChartOpts(opts.LineChart{Smooth: true}))
@@ -197,13 +191,27 @@ func createLineChart(tickets map[string]Count, keys []string) {
 	_ = line.Render(f)
 }
 
-// func sortedDates(tickets map[string]V) ([]K) {
-// 	keys := make([]K, len(m))
-// 	i := 0
-// 	for k := range m {
-// 		keys[i] = k
-// 		i++
-// 	}
-// 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-// 	return keys
-// }
+func sortedDates(tickets map[string]Count) []string {
+	keys := make([]string, len(tickets))
+	i := 0
+	for k := range tickets {
+		keys[i] = k
+		i++
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		var result bool
+		date1, _ := time.Parse("02-January-2006", keys[i])
+		date2, _ := time.Parse("02-January-2006", keys[j])
+		if int(date1.Month()) < int(date2.Month()) {
+			result = true
+		} else if int(date1.Month()) > int(date2.Month()) {
+			result = false
+		} else if int(date1.Day()) < int(date2.Day()) {
+			result = true
+		} else {
+			result = false
+		}
+		return result
+	})
+	return keys
+}
